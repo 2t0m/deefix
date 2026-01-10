@@ -56,14 +56,11 @@ def is_duplicate_and_remove(file_path):
         # Check if original file exists in same folder
         if os.path.exists(original_path):
             try:
-                # Compare file sizes first (quick check)
+                # Compare file sizes only
                 if os.path.getsize(file_path) == os.path.getsize(original_path):
-                    # If same size, compare content
-                    with open(file_path, 'rb') as f1, open(original_path, 'rb') as f2:
-                        if f1.read() == f2.read():
-                            os.remove(file_path)
-                            print(f"Removed duplicate: {base_name} (identical to {original_name}{ext})", file=sys.stderr)
-                            return True
+                    os.remove(file_path)
+                    print(f"Removed duplicate: {base_name} (same size as {original_name}{ext})", file=sys.stderr)
+                    return True
             except Exception as e:
                 print(f"Error checking duplicate {file_path}: {e}", file=sys.stderr)
     return False
