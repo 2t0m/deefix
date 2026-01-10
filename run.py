@@ -39,6 +39,35 @@ def is_in_hidden_folder(file_path):
     parts = os.path.normpath(file_path).split(os.sep)
     return any(part.startswith('.') and part != '.' and part != '..' for part in parts)
 
+def is_duplicate_and_remove(file_path):
+    """Check if file has (n) suffix and is duplicate of original, then remove it"""
+    import re
+    
+    dir_name = os.path.dirname(file_path)
+    base_name = os.path.basename(file_path)
+    name, ext = os.path.splitext(base_name)
+    
+    # Match pattern like "Song (1)" or "Song (2)"
+    match = re.match(r'^(.+?)\s*\(\d+\)$', name)
+    if match:
+        original_name = match.group(1)
+        original_path = os.path.join(dir_name, original_name + ext)
+        
+        # Check if original file exists in same folder
+        if os.path.exists(original_path):
+            try:
+                # Compare file sizes first (quick check)
+                if os.path.getsize(file_path) == os.path.getsize(original_path):
+                    # If same size, compare content
+                    with open(file_path, 'rb') as f1, open(original_path, 'rb') as f2:
+                        if f1.read() == f2.read():
+                            os.remove(file_path)
+                            print(f"Removed duplicate: {base_name} (identical to {original_name}{ext})", file=sys.stderr)
+                            return True
+            except Exception as e:
+                print(f"Error checking duplicate {file_path}: {e}", file=sys.stderr)
+    return False
+
 def wait_for_file_ready(file_path, timeout=30, check_interval=0.5):
     """Wait until file is fully transferred by checking if size stabilizes"""
     if not os.path.exists(file_path):
@@ -79,6 +108,10 @@ class MP3Handler(FileSystemEventHandler):
                 return
             print(f"New file detected: {event.src_path} (waiting for transfer to complete)", file=sys.stderr)
             if wait_for_file_ready(event.src_path):
+                # Check and remove if it's a duplicate (if enabled)
+                if os.environ.get('REMOVE_DUPLICATES', 'false').lower() == 'true':
+                    if is_duplicate_and_remove(event.src_path):
+                        return
                 self.process_file_func(event.src_path)
             else:
                 print(f"Timeout waiting for file transfer: {event.src_path}", file=sys.stderr)
@@ -89,7 +122,7 @@ def process_mp3_file(file_path):
         print(f"File already processed, ignored: {file_path}")
         return
     tags, artist, album, title = get_mp3_tags(file_path)
-    print(f"File: {os.path.basename(file_path)}")
+    print(f"File: {file_path}")
     if artist and title:
         track_id = search_deezer_track(artist, album, title)
         if track_id:
@@ -121,6 +154,19 @@ def process_mp3_file(file_path):
                 contributors = [c['name'] for c in info.get('contributors', [])]
                 if contributors:
                     set_mp3_tag(file_path, 'artist', ', '.join(contributors))
+                
+                # Search for synced lyrics if enabled
+                if os.environ.get('FETCH_LYRICS', 'false').lower() == 'true':
+                    duration = get_audio_duration(file_path)
+                    lyrics = search_lrclib_lyrics(
+                        deezer_tags.get('artist', artist),
+                        deezer_tags.get('title', title),
+                        deezer_tags.get('album', album),
+                        duration
+                    )
+                    if lyrics:
+                        set_mp3_tag(file_path, 'lyrics', lyrics)
+                
                 print("Tags updated from Deezer (identical ISRC)\n")
                 mark_file_processed(file_path)
         else:
@@ -144,6 +190,14 @@ def set_mp3_tag(file_path, tag, value):
             id3.add(TXXX(encoding=3, desc='replaygain_track_gain', text=str(value)))
             id3.save(file_path)
             print(f"Tag 'replaygain_track_gain' updated in {file_path}: {value}")
+        elif tag == 'lyrics':
+            # Use USLT frame for synced lyrics
+            from mutagen.id3 import ID3, USLT
+            id3 = ID3(file_path)
+            id3.delall('USLT')
+            id3.add(USLT(encoding=3, lang='eng', desc='', text=value))
+            id3.save(file_path)
+            print(f"Synced lyrics added to {file_path}")
         else:
             audio[tag] = value if isinstance(value, list) else [value]
             audio.save()
@@ -163,6 +217,16 @@ def get_mp3_tags(file_path):
         print(f"Error reading tags: {e}", file=sys.stderr)
         return {}, '', '', ''
 
+def get_audio_duration(file_path):
+    """Get audio duration in seconds"""
+    try:
+        from mutagen.mp3 import MP3
+        audio = MP3(file_path)
+        return int(audio.info.length)
+    except Exception as e:
+        print(f"Error getting duration: {e}", file=sys.stderr)
+        return None
+
 def search_deezer_track(artist, album, title):
     import urllib.parse
     query = f"{artist} {album} {title}"
@@ -175,6 +239,36 @@ def search_deezer_track(artist, album, title):
         if data['data']:
             track = data['data'][0]
             return track['id']
+    return None
+
+def search_lrclib_lyrics(artist, title, album=None, duration=None):
+    """Search for synchronized lyrics on lrclib.net"""
+    try:
+        params = {
+            'artist_name': artist,
+            'track_name': title,
+        }
+        if album:
+            params['album_name'] = album
+        if duration:
+            params['duration'] = duration
+        
+        url = "https://lrclib.net/api/get"
+        print(f"Searching lrclib for lyrics: {artist} - {title}")
+        response = requests.get(url, params=params, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            synced_lyrics = data.get('syncedLyrics')
+            if synced_lyrics:
+                print(f"Found synced lyrics on lrclib")
+                return synced_lyrics
+        elif response.status_code == 404:
+            print(f"No lyrics found on lrclib")
+        else:
+            print(f"lrclib returned status {response.status_code}", file=sys.stderr)
+    except Exception as e:
+        print(f"Error searching lrclib: {e}", file=sys.stderr)
     return None
 
 def get_deezer_track_info(track_id):
@@ -194,6 +288,10 @@ def main(folder):
                 if is_in_hidden_folder(path):
                     print(f"File in hidden folder, ignored: {path}", file=sys.stderr)
                     continue
+                # Check and remove if it's a duplicate (if enabled)
+                if os.environ.get('REMOVE_DUPLICATES', 'false').lower() == 'true':
+                    if is_duplicate_and_remove(path):
+                        continue
                 process_mp3_file(path)
 
     # Watcher for new files

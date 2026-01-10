@@ -64,6 +64,10 @@ The MP3 folder path is configured via the `MP3_FOLDER_PATH` environment variable
 
 The database is persisted in the `./data` directory.
 
+**Optional features:**
+- `FETCH_LYRICS=true` - Enable synchronized lyrics search from lrclib.net (default: false)
+- `REMOVE_DUPLICATES=true` - Auto-remove duplicate files with (1), (2), etc. suffixes (default: false)
+
 ## Local Development
 
 1. Install dependencies:
