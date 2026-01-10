@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   deefix:
-    build: .
+    image: ghcr.io/2t0m/deefix:main
     container_name: deefix
     environment:
       - MP3_FOLDER_PATH=/music
