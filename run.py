@@ -1,12 +1,11 @@
 import sqlite3
-# Organized imports
 import os
 import sys
 import time
 import sqlite3
 import requests
 from mutagen.easyid3 import EasyID3
-from mutagen.id3 import ID3, ID3NoHeaderError
+from mutagen.id3 import ID3NoHeaderError
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
@@ -52,17 +51,14 @@ def is_duplicate_and_remove(file_path):
     if match:
         original_name = match.group(1)
         original_path = os.path.join(dir_name, original_name + ext)
-        
         # Check if original file exists in same folder
         if os.path.exists(original_path):
             try:
-                # Compare file sizes only
-                if os.path.getsize(file_path) == os.path.getsize(original_path):
-                    os.remove(file_path)
-                    print(f"Removed duplicate: {base_name} (same size as {original_name}{ext})", file=sys.stderr)
-                    return True
+                os.remove(file_path)
+                print(f"Removed duplicate: {base_name} (original exists: {original_name}{ext})", file=sys.stderr)
+                return True
             except Exception as e:
-                print(f"Error checking duplicate {file_path}: {e}", file=sys.stderr)
+                print(f"Error removing duplicate {file_path}: {e}", file=sys.stderr)
     return False
 
 def wait_for_file_ready(file_path, timeout=30, check_interval=0.5):
@@ -105,71 +101,110 @@ class MP3Handler(FileSystemEventHandler):
                 return
             print(f"New file detected: {event.src_path} (waiting for transfer to complete)", file=sys.stderr)
             if wait_for_file_ready(event.src_path):
+                print(f"File ready: {event.src_path}", file=sys.stderr)
                 # Check and remove if it's a duplicate (if enabled)
                 if os.environ.get('REMOVE_DUPLICATES', 'false').lower() == 'true':
                     if is_duplicate_and_remove(event.src_path):
                         return
+                print(f"Processing file: {event.src_path}", file=sys.stderr)
                 self.process_file_func(event.src_path)
+                print(f"File processing completed: {event.src_path}", file=sys.stderr)
             else:
                 print(f"Timeout waiting for file transfer: {event.src_path}", file=sys.stderr)
 
 # Function to process a single mp3 file
-def process_mp3_file(file_path):
+def process_mp3_file(file_path, stats=None):
     if is_file_processed(file_path):
         print(f"File already processed, ignored: {file_path}")
-        return
+        if stats:
+            stats['already_processed'] += 1
+        return 'already_processed'
+    print(f"Reading tags from: {file_path}", file=sys.stderr)
     tags, artist, album, title = get_mp3_tags(file_path)
     print(f"File: {file_path}")
     if artist and title:
-        track_id = search_deezer_track(artist, album, title)
-        if track_id:
-            info = get_deezer_track_info(track_id)
-            # Get albumartist from album artist, fallback to main artist
-            album_artist = info.get('album', {}).get('artist', {}).get('name') if info.get('album', {}).get('artist') else None
-            if not album_artist:
-                album_artist = info.get('artist', {}).get('name')
-            
-            deezer_tags = {
-                'album': info.get('album', {}).get('title'),
-                'title': info.get('title'),
-                'artist': info.get('artist', {}).get('name'),
-                'albumartist': album_artist,
-                'discnumber': str(info.get('disk_number')),
-                'tracknumber': str(info.get('track_position')),
-                'isrc': info.get('isrc'),
-                'genre': info.get('genre'),
-                'date': info.get('release_date'),
-                'gain': str(info.get('gain')) if info.get('gain') is not None else None,
-            }
+        track_ids = search_deezer_track(artist, album, title)
+        if track_ids:
             mp3_isrc = tags.get('isrc', [''])[0] if isinstance(tags.get('isrc'), list) else tags.get('isrc', '')
-            deezer_isrc = deezer_tags.get('isrc', '')
-            if mp3_isrc and deezer_isrc and mp3_isrc == deezer_isrc:
-                for k in ['album','title','albumartist','discnumber','tracknumber','genre','date','gain']:
-                    val = deezer_tags.get(k)
-                    if val is not None:
-                        set_mp3_tag(file_path, k, val)
-                contributors = [c['name'] for c in info.get('contributors', [])]
-                if contributors:
-                    set_mp3_tag(file_path, 'artist', ', '.join(contributors))
+            print(f"MP3 ISRC: '{mp3_isrc}'")
+            
+            # Try each track ID until we find one with matching ISRC
+            for idx, track_id in enumerate(track_ids, 1):
+                info = get_deezer_track_info(track_id)
+                if not info:
+                    continue
+                    
+                # Get albumartist from album artist, fallback to main artist
+                album_artist = info.get('album', {}).get('artist', {}).get('name') if info.get('album', {}).get('artist') else None
+                if not album_artist:
+                    album_artist = info.get('artist', {}).get('name')
                 
-                # Search for synced lyrics if enabled
-                if os.environ.get('FETCH_LYRICS', 'false').lower() == 'true':
-                    duration = get_audio_duration(file_path)
-                    lyrics = search_lrclib_lyrics(
-                        deezer_tags.get('artist', artist),
-                        deezer_tags.get('title', title),
-                        deezer_tags.get('album', album),
-                        duration
-                    )
-                    if lyrics:
-                        set_mp3_tag(file_path, 'lyrics', lyrics)
+                deezer_tags = {
+                    'album': info.get('album', {}).get('title'),
+                    'title': info.get('title'),
+                    'artist': info.get('artist', {}).get('name'),
+                    'albumartist': album_artist,
+                    'discnumber': str(info.get('disk_number')),
+                    'tracknumber': str(info.get('track_position')),
+                    'isrc': info.get('isrc'),
+                    'genre': info.get('genre'),
+                    'date': info.get('release_date'),
+                    'gain': str(info.get('gain')) if info.get('gain') is not None else None,
+                }
+                deezer_isrc = deezer_tags.get('isrc', '')
                 
-                print("Tags updated from Deezer (identical ISRC)\n")
-                mark_file_processed(file_path)
+                print(f"Result {idx}/{len(track_ids)} - Deezer ISRC: '{deezer_isrc}'")
+                
+                if mp3_isrc and deezer_isrc and mp3_isrc == deezer_isrc:
+                    print(f"ISRC match found on result {idx}!")
+                    for k in ['album','title','albumartist','discnumber','tracknumber','genre','date','gain']:
+                        val = deezer_tags.get(k)
+                        if val is not None:
+                            set_mp3_tag(file_path, k, val)
+                    contributors = [c['name'] for c in info.get('contributors', [])]
+                    if contributors:
+                        set_mp3_tag(file_path, 'artist', ', '.join(contributors))
+                    
+                    # Search for synced lyrics if enabled
+                    if os.environ.get('FETCH_LYRICS', 'false').lower() == 'true':
+                        duration = get_audio_duration(file_path)
+                        lyrics = search_lrclib_lyrics(
+                            deezer_tags.get('artist', artist),
+                            deezer_tags.get('title', title),
+                            deezer_tags.get('album', album),
+                            duration
+                        )
+                        if lyrics:
+                            set_mp3_tag(file_path, 'lyrics', lyrics)
+                    
+                    print("Tags updated from Deezer (identical ISRC)\n")
+                    mark_file_processed(file_path)
+                    if stats:
+                        stats['isrc_match'] += 1
+                    return 'isrc_match'
+                    break
+            else:
+                # No matching ISRC found in any result
+                if not mp3_isrc:
+                    print("No ISRC in MP3 file, tags not updated\n")
+                    if stats:
+                        stats['no_isrc_in_mp3'] += 1
+                    return 'no_isrc_in_mp3'
+                else:
+                    print(f"No matching ISRC found in {len(track_ids)} Deezer results, tags not updated\n")
+                    if stats:
+                        stats['no_matching_isrc'] += 1
+                    return 'no_matching_isrc'
         else:
             print("No Deezer results\n")
+            if stats:
+                stats['no_deezer_results'] += 1
+            return 'no_deezer_results'
     else:
         print("Incomplete tags\n")
+        if stats:
+            stats['incomplete_tags'] += 1
+        return 'incomplete_tags'
 
 def set_mp3_tag(file_path, tag, value):
     try:
@@ -231,12 +266,31 @@ def search_deezer_track(artist, album, title):
     url = f"https://api.deezer.com/search?q={encoded_query}"
     print(f"Calling Deezer Search URL: {url}")
     response = requests.get(url)
+    track_ids = []
     if response.status_code == 200:
         data = response.json()
         if data['data']:
-            track = data['data'][0]
-            return track['id']
-    return None
+            # Return up to 5 track IDs
+            track_ids = [track['id'] for track in data['data'][:5]]
+            print(f"Found {len(track_ids)} results with full query")
+            return track_ids
+    
+    # If no results, try simplified query (artist + title only)
+    print("No results with full query, trying simplified search...")
+    query_simple = f"{artist} {title}"
+    encoded_query_simple = urllib.parse.quote(query_simple)
+    url_simple = f"https://api.deezer.com/search?q={encoded_query_simple}"
+    print(f"Calling Deezer Search URL: {url_simple}")
+    response_simple = requests.get(url_simple)
+    if response_simple.status_code == 200:
+        data_simple = response_simple.json()
+        if data_simple['data']:
+            # Return up to 5 track IDs
+            track_ids = [track['id'] for track in data_simple['data'][:5]]
+            print(f"Found {len(track_ids)} results with simplified query")
+            return track_ids
+    
+    return []
 
 def search_lrclib_lyrics(artist, title, album=None, duration=None):
     """Search for synchronized lyrics on lrclib.net"""
@@ -251,8 +305,8 @@ def search_lrclib_lyrics(artist, title, album=None, duration=None):
             params['duration'] = duration
         
         url = "https://lrclib.net/api/get"
-        print(f"Searching lrclib for lyrics: {artist} - {title}")
-        response = requests.get(url, params=params, timeout=10)
+        print(f"Searching lrclib for lyrics: {artist} - {title}", file=sys.stderr)
+        response = requests.get(url, params=params, timeout=30)
         
         if response.status_code == 200:
             data = response.json()
@@ -278,18 +332,57 @@ def get_deezer_track_info(track_id):
 
 def main(folder):
     init_db()
+    
+    # Initialize statistics
+    stats = {
+        'total_files': 0,
+        'isrc_match': 0,
+        'no_isrc_in_mp3': 0,
+        'no_matching_isrc': 0,
+        'no_deezer_results': 0,
+        'incomplete_tags': 0,
+        'already_processed': 0,
+        'hidden_folders': 0,
+        'duplicates_removed': 0
+    }
+    
+    print("Starting initial scan...", file=sys.stderr)
     for root, _, files in os.walk(folder):
         for file in files:
             if file.lower().endswith('.mp3'):
                 path = os.path.join(root, file)
                 if is_in_hidden_folder(path):
                     print(f"File in hidden folder, ignored: {path}", file=sys.stderr)
+                    stats['hidden_folders'] += 1
                     continue
                 # Check and remove if it's a duplicate (if enabled)
                 if os.environ.get('REMOVE_DUPLICATES', 'false').lower() == 'true':
                     if is_duplicate_and_remove(path):
+                        stats['duplicates_removed'] += 1
                         continue
-                process_mp3_file(path)
+                stats['total_files'] += 1
+                process_mp3_file(path, stats)
+    
+    # Display statistics
+    print("\n" + "="*60, file=sys.stderr)
+    print("INITIAL SCAN STATISTICS", file=sys.stderr)
+    print("="*60, file=sys.stderr)
+    print(f"Total files processed: {stats['total_files']}", file=sys.stderr)
+    print(f"  ✓ ISRC match (tags updated): {stats['isrc_match']}", file=sys.stderr)
+    print(f"  ✗ No ISRC in MP3 file: {stats['no_isrc_in_mp3']}", file=sys.stderr)
+    print(f"  ✗ No matching ISRC in Deezer results: {stats['no_matching_isrc']}", file=sys.stderr)
+    print(f"  ✗ No Deezer results: {stats['no_deezer_results']}", file=sys.stderr)
+    print(f"  ✗ Incomplete tags (no artist/title): {stats['incomplete_tags']}", file=sys.stderr)
+    print(f"  - Already processed (skipped): {stats['already_processed']}", file=sys.stderr)
+    if stats['hidden_folders'] > 0:
+        print(f"  - Hidden folders (skipped): {stats['hidden_folders']}", file=sys.stderr)
+    if stats['duplicates_removed'] > 0:
+        print(f"  - Duplicates removed: {stats['duplicates_removed']}", file=sys.stderr)
+    
+    if stats['total_files'] > 0:
+        success_rate = (stats['isrc_match'] / stats['total_files']) * 100
+        print(f"\nSuccess rate: {success_rate:.1f}%", file=sys.stderr)
+    print("="*60 + "\n", file=sys.stderr)
 
     # Watcher for new files
     print("Activating watcher for new MP3 files...", file=sys.stderr)
