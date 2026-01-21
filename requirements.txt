@@ -1,3 +1,4 @@
 mutagen
 requests
 watchdog
+ddgs

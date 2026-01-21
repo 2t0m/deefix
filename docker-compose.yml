@@ -5,10 +5,11 @@ services:
     image: ghcr.io/2t0m/deefix:main
     container_name: deefix
     environment:
-      - MP3_FOLDER_PATH=/music
-      - DB_FOLDER=/data
+      - FIX_TAGS=true
       - FETCH_LYRICS=true
       - REMOVE_DUPLICATES=true
+      - FETCH_VIDEO_ARTWORK=true
+      - FIX_GAIN=true
     volumes:
       # Mount your MP3 folder - change the left side to your actual path
       - /path/to/your/music:/music
