@@ -204,7 +204,9 @@ def _update_tags_from_deezer(options, tags, artist, album, title, file_path, tra
                     set_mp3_tag(file_path, 'lyrics', lyrics)
                     print("Lyrics added to MP3 file", file=sys.stderr)
                 else:
-                    print("No lyrics added (not found or error)", file=sys.stderr)
+                    print("No lyrics found on lrclib.net for this track", file=sys.stderr)
+            else:
+                print("Lyrics fetching disabled (FETCH_LYRICS=false)", file=sys.stderr)
             
             print("Tags updated from Deezer (identical ISRC)\n")
             handle_stats(stats, 'isrc_match')

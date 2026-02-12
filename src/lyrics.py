@@ -37,10 +37,12 @@ def search_lrclib_lyrics(artist, title, album=None, duration=None):
             data = response.json()
             synced_lyrics = data.get('syncedLyrics')
             if synced_lyrics:
-                print(f"Found synced lyrics on lrclib")
+                print(f"Found synced lyrics on lrclib", file=sys.stderr)
                 return synced_lyrics
+            else:
+                print(f"lrclib found the track but no synced lyrics available", file=sys.stderr)
         elif response.status_code == 404:
-            print(f"No lyrics found on lrclib")
+            print(f"Track not found on lrclib (404)", file=sys.stderr)
         else:
             print(f"lrclib returned status {response.status_code}", file=sys.stderr)
     except Exception as e:
