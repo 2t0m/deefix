@@ -11,6 +11,7 @@ from .artwork import fetch_video_artwork
 from .deezer_api import search_deezer_track, get_deezer_track_info
 from .lyrics import search_lrclib_lyrics
 from .gain import fix_gain
+from .essentia_analysis import analyze_with_essentia
 
 
 def handle_stats(stats, key):
@@ -52,13 +53,15 @@ def process_mp3_file(file_path, stats=None):
         'tags_fixed': False,
         'lyrics_fetched': False,
         'artwork_generated': False,
-        'gain_applied': False
+        'gain_applied': False,
+        'essentia_analyzed': False
     }
     
     # Determine what still needs processing
     skip_tags = processed_status and processed_status['tags_fixed'] and not options['fix_tags']
     skip_artwork = processed_status and processed_status['artwork_generated']
     skip_gain = processed_status and processed_status['gain_applied']
+    skip_essentia = processed_status and processed_status['essentia_analyzed']
     
     if processed_status:
         handle_stats(stats, 'already_processed')
@@ -68,6 +71,7 @@ def process_mp3_file(file_path, stats=None):
     print(f"Reading tags from: {file_path}", file=sys.stderr)
     tags = get_mp3_tags(file_path)[0]
     artist, album, title, has_tags = check_tags(tags)
+    albumartist = tags.get('albumartist', [''])[0] if 'albumartist' in tags else tags.get('artist', [''])[0]
     print(f"File: {file_path}")
     
     if not has_tags:
@@ -109,16 +113,42 @@ def process_mp3_file(file_path, stats=None):
             processing_done['gain_applied'] = True
     elif processed_status:
         processing_done['gain_applied'] = processed_status['gain_applied']
+
+    # Step 7: Analyze with Essentia if enabled and not already done
+    if not skip_essentia and options['analyze_essentia']:
+        essentia_result = analyze_with_essentia(file_path, stats)
+        if essentia_result:
+            processing_done['essentia_analyzed'] = True
+    elif processed_status:
+        processing_done['essentia_analyzed'] = processed_status['essentia_analyzed']
     
-    # Update database with processing status
-    update_file_processing_status(
-        file_path,
-        tags_fixed=processing_done['tags_fixed'],
-        lyrics_fetched=processing_done['lyrics_fetched'],
-        artwork_generated=processing_done['artwork_generated'],
-        gain_applied=processing_done['gain_applied']
-    )
-    
+    # Step 8: Organize MP3 file if enabled
+    if options['organize_mp3']:
+        from .file_utils import move_mp3_to_library
+        try:
+            # Update database with processing status before moving file
+            update_file_processing_status(
+                file_path,
+                tags_fixed=True,
+                lyrics_fetched=processing_done['lyrics_fetched'],
+                artwork_generated=processing_done['artwork_generated'],
+                gain_applied=processing_done['gain_applied'],
+                essentia_analyzed=processing_done['essentia_analyzed']
+            )
+            move_mp3_to_library(file_path, albumartist, album, title)
+            print(f"MP3 file organized: {albumartist}/{album}/{title}", file=sys.stderr)
+        except Exception as e:
+            print(f"Error organizing MP3 file: {e}", file=sys.stderr)
+    else:
+        # Update database with processing status (si pas d'organisation)
+        update_file_processing_status(
+            file_path,
+            tags_fixed=processing_done['tags_fixed'],
+            lyrics_fetched=processing_done['lyrics_fetched'],
+            artwork_generated=processing_done['artwork_generated'],
+            gain_applied=processing_done['gain_applied'],
+            essentia_analyzed=processing_done['essentia_analyzed']
+        )
     return result
 
 
@@ -191,20 +221,32 @@ def _update_tags_from_deezer(options, tags, artist, album, title, file_path, tra
             if contributors:
                 set_mp3_tag(file_path, 'artist', ', '.join(contributors))
             
-            # Fetch lyrics if enabled
+            # Fetch lyrics if enabled and not already present
             if options['fetch_lyrics']:
-                duration = get_audio_duration(file_path)
-                lyrics = search_lrclib_lyrics(
-                    deezer_tags.get('artist', artist),
-                    deezer_tags.get('title', title),
-                    deezer_tags.get('album', album),
-                    duration
-                )
-                if lyrics:
-                    set_mp3_tag(file_path, 'lyrics', lyrics)
-                    print("Lyrics added to MP3 file", file=sys.stderr)
+                from mutagen.id3 import ID3
+                id3 = ID3(file_path)
+                has_unsynced = any(frame.FrameID == 'USLT' or frame.FrameID == 'UNSYNCEDLYRICS' for frame in id3.values())
+                if has_unsynced:
+                    print("UNSYNCEDLYRICS already present in MP3, skipping lyrics fetch.", file=sys.stderr)
                 else:
-                    print("No lyrics found on lrclib.net for this track", file=sys.stderr)
+                    from .mp3_tags import get_mp3_tags
+                    merged_tags, *_ = get_mp3_tags(file_path)
+                    existing_lyrics = merged_tags.get('lyrics', [''])[0] if isinstance(merged_tags.get('lyrics'), list) else merged_tags.get('lyrics', '')
+                    if existing_lyrics:
+                        print("Lyrics already present in MP3, skipping download.", file=sys.stderr)
+                    else:
+                        duration = get_audio_duration(file_path)
+                        lyrics = search_lrclib_lyrics(
+                            deezer_tags.get('artist', artist),
+                            deezer_tags.get('title', title),
+                            deezer_tags.get('album', album),
+                            duration
+                        )
+                        if lyrics:
+                            set_mp3_tag(file_path, 'lyrics', lyrics)
+                            print("Lyrics added to MP3 file", file=sys.stderr)
+                        else:
+                            print("No lyrics found on lrclib.net for this track", file=sys.stderr)
             else:
                 print("Lyrics fetching disabled (FETCH_LYRICS=false)", file=sys.stderr)
             

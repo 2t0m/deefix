@@ -2,3 +2,4 @@ mutagen
 requests
 watchdog
 ddgs
+essentia-tensorflow

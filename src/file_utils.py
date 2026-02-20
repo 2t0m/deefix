@@ -1,3 +1,73 @@
+def move_mp3_to_library(file_path, artist, album, title, music_root="/music"):
+    """Move MP3 file to ArtistAlbum/Album/Title.mp3, handle duplicates."""
+    import shutil
+    import unicodedata
+    import re
+    import os
+    import sys
+    
+    def safe_name(name):
+        # Remove forbidden chars and normalize
+        name = unicodedata.normalize('NFKD', name).encode('ascii', 'ignore').decode('ascii')
+        name = re.sub(r'[\\/:*?"<>|]', '', name)
+        name = name.strip().replace('  ', ' ')
+        return name or 'Unknown'
+    
+    artist_dir = safe_name(artist)
+    album_dir = safe_name(album)
+    title_file = safe_name(title) + ".mp3"
+    albumartist_dir = safe_name(artist)  # 'artist' is actually albumartist in processor.py
+    dest_dir = os.path.join(music_root, albumartist_dir, album_dir)
+    os.makedirs(dest_dir, exist_ok=True)
+    dest_path = os.path.join(dest_dir, title_file)
+    from .config import get_processing_options
+    options = get_processing_options()
+    remove_duplicates = options.get('remove_duplicates', False)
+    removed = False
+    if os.path.abspath(file_path) == os.path.abspath(dest_path):
+        # File is already in the correct location, no need to move
+        return dest_path
+    if os.path.exists(dest_path):
+        if remove_duplicates:
+            # Never delete the source file, just ignore the move
+            # (do nothing, do not print any message)
+            removed = True
+            return dest_path
+        else:
+            # Rename with (1), (2), ...
+            base, ext = os.path.splitext(dest_path)
+            i = 1
+            new_dest = f"{base} ({i}){ext}"
+            while os.path.exists(new_dest):
+                i += 1
+                new_dest = f"{base} ({i}){ext}"
+            dest_path = new_dest
+    if not removed:
+        shutil.move(file_path, dest_path)
+        print(f"Moved MP3 to: {dest_path}", file=sys.stderr)
+        # Déplacer cover.webp s'il existe dans le dossier source
+        src_cover = os.path.join(os.path.dirname(file_path), 'cover.webp')
+        if os.path.exists(src_cover):
+            dest_cover = os.path.join(dest_dir, 'cover.webp')
+            try:
+                shutil.move(src_cover, dest_cover)
+                print(f"Moved cover.webp to: {dest_cover}", file=sys.stderr)
+            except Exception as e:
+                print(f"Error moving cover.webp: {e}", file=sys.stderr)
+    # Clean up empty folders up the tree from the original file location
+    def cleanup_empty_dirs(path, stop_at=music_root):
+        path = os.path.dirname(path)
+        stop_at = os.path.abspath(stop_at)
+        while os.path.abspath(path).startswith(stop_at) and path != stop_at:
+            try:
+                if not os.listdir(path):
+                    os.rmdir(path)
+                    print(f"Removed empty folder: {path}", file=sys.stderr)
+                path = os.path.dirname(path)
+            except Exception:
+                break
+    cleanup_empty_dirs(file_path)
+    return dest_path
 """
 File utilities for DeeFix.
 Handles file operations like checking for duplicates, hidden folders, and file readiness.

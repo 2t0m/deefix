@@ -6,7 +6,7 @@ Handles reading and writing ID3 tags.
 import sys
 import re
 from mutagen.easyid3 import EasyID3
-from mutagen.id3 import ID3NoHeaderError, ID3, TXXX, USLT
+from mutagen.id3 import ID3NoHeaderError, ID3, TXXX, USLT, TMOO, TBPM, TKEY
 from mutagen.mp3 import MP3
 
 
@@ -151,10 +151,61 @@ def set_mp3_tag(file_path, tag, value):
             id3.add(USLT(encoding=3, lang='eng', desc='', text=value))
             id3.save(file_path)
             print(f"Synced lyrics added to {file_path}")
+        elif tag == 'mood':
+            # Deduplicate moods before writing
+            if isinstance(value, list):
+                items = [str(v).strip() for v in value]
+            else:
+                items = [v.strip() for v in re.split(r"[;,]", str(value)) if v.strip()]
+            seen = set()
+            unique_items = [x for x in items if not (x in seen or seen.add(x))]
+            mood_str = "; ".join(unique_items)
+            id3 = ID3(file_path)
+            id3.delall('TMOO')
+            id3.add(TMOO(encoding=3, text=[mood_str]))
+            id3.delall('TXXX:MOOD')
+            # id3.add(TXXX(encoding=3, desc='MOOD', text=mood_str))
+            id3.save(file_path)
+            print(f"Tag 'mood' updated in {file_path}: {mood_str}")
+        elif tag == 'bpm':
+            id3 = ID3(file_path)
+            id3.delall('TBPM')
+            id3.add(TBPM(encoding=3, text=[str(value)]))
+            id3.save(file_path)
+            print(f"Tag 'bpm' updated in {file_path}: {value}")
+        elif tag == 'initialkey':
+            id3 = ID3(file_path)
+            id3.delall('TKEY')
+            id3.add(TKEY(encoding=3, text=[str(value)]))
+            id3.save(file_path)
+            print(f"Tag 'initialkey' updated in {file_path}: {value}")
+        elif tag.startswith('txxx:'):
+            desc = tag.split(':', 1)[1]
+            id3 = ID3(file_path)
+            id3.delall(f'TXXX:{desc}')
+            id3.add(TXXX(encoding=3, desc=desc, text=str(value)))
+            id3.save(file_path)
+            print(f"Tag 'TXXX:{desc}' updated in {file_path}: {value}")
         else:
-            audio[tag] = value if isinstance(value, list) else [value]
+            # For other tags, handle lists and convert to string
+            if isinstance(value, list):
+                value_str = "; ".join(str(v) for v in value)
+            else:
+                value_str = str(value)
+            # For tags that can have multiple values (artist, genre, mood, etc.)
+            if tag == "genre":
+                # For genre, clear existing value before writing new one
+                if tag in audio:
+                    del audio[tag]
+                audio[tag] = [value_str]
+            elif tag in ["artist", "albumartist", "mood", "composer", "lyricist"]:
+                items = [v.strip() for v in re.split(r"[;,]", value_str) if v.strip()]
+                unique_sorted = sorted(set(items), key=str.lower)
+                audio[tag] = ["; ".join(unique_sorted)]
+            else:
+                audio[tag] = [value_str]
             audio.save()
-            print(f"Tag '{tag}' updated in {file_path}: {value}")
+            print(f"Tag '{tag}' updated in {file_path}: {value_str}")
     except Exception as e:
         print(f"Error in set_mp3_tag on {file_path}: {e}", file=sys.stderr)
 

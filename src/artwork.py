@@ -38,6 +38,8 @@ def fetch_video_artwork(artist, album, title, file_path, stats=None):
         return True  # Already exists, consider as success
     
     try:
+        os.environ['CURL_CFFI_IMPERSONATE'] = 'random'
+
         # Step 1: Search for Apple Music album page
         query = f"{artist} {album} {title} site:music.apple.com"
         results = []
@@ -46,23 +48,23 @@ def fetch_video_artwork(artist, album, title, file_path, stats=None):
                 url = r.get('href') or r.get('url')
                 if url:
                     results.append(url)
-        
+
         # Filter for album links only
         album_links = [u for u in results if "/album/" in u]
         if not album_links:
             print("No Apple Music album URL found in search results.", file=sys.stderr)
             print(f"Search results: {results}", file=sys.stderr)
             return False
-        
+
         apple_url = album_links[0]
-        
+
         # Step 2: Fetch Apple Music page
         headers = {"User-Agent": "Mozilla/5.0"}
         page = requests.get(apple_url, headers=headers, timeout=10)
         if page.status_code != 200:
             print(f"Apple Music error: {page.status_code}", file=sys.stderr)
             return False
-        
+
         # Step 3: Extract m3u8 video URL
         m3u8_url = None
         for match in re.finditer(r'<amp-ambient-video[^>]*src=\"([^\"]+\.m3u8)\"', page.text):
@@ -70,11 +72,11 @@ def fetch_video_artwork(artist, album, title, file_path, stats=None):
             if candidate.startswith("https://"):
                 m3u8_url = candidate
                 break
-        
+
         if not m3u8_url:
             print("No m3u8 found on the album page from Apple Music.", file=sys.stderr)
             return False
-        
+
         # Step 4: Generate cover.webp with ffmpeg
         ffmpeg_cmd = [
             "ffmpeg",
@@ -84,13 +86,25 @@ def fetch_video_artwork(artist, album, title, file_path, stats=None):
             "-loop", "0",
             out_path
         ]
-        
-        subprocess.run(ffmpeg_cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        try:
+            subprocess.run(ffmpeg_cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception as ffmpeg_error:
+            # Si ffmpeg a échoué, supprimer cover.webp si vide
+            if os.path.exists(out_path) and os.path.getsize(out_path) == 0:
+                try:
+                    os.remove(out_path)
+                    print(f"cover.webp was empty after ffmpeg failure, deleted: {out_path}", file=sys.stderr)
+                except Exception as rm_error:
+                    print(f"Error deleting empty cover.webp: {rm_error}", file=sys.stderr)
+            print(f"Error fetch_video_artwork: {ffmpeg_error}", file=sys.stderr)
+            return False
+
         print(f"Artwork generated successfully: {out_path}", file=sys.stderr)
         if stats is not None:
             stats['artwork_fetched'] += 1
         return True  # Success
-            
+
     except Exception as e:
         print(f"Error fetch_video_artwork: {e}", file=sys.stderr)
         return False

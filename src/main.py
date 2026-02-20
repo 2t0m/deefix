@@ -36,32 +36,40 @@ def main(folder):
         'hidden_folders': 0,
         'duplicates_removed': 0,
         'artwork_fetched': 0,
-        'gain_fixed': 0
+        'gain_fixed': 0,
+        'essentia_analyzed': 0
     }
     
     # Initial scan of all MP3 files
     print("Starting initial scan...", file=sys.stderr)
+    # Récupère la liste de tous les fichiers MP3 à traiter
+    mp3_files = []
     for root, _, files in os.walk(folder):
         for file in files:
-            if not file.lower().endswith('.mp3'):
-                continue
-            
-            path = os.path.join(root, file)
-            
-            # Skip hidden folders
-            if is_in_hidden_folder(path):
-                print(f"File in hidden folder, ignored: {path}", file=sys.stderr)
-                stats['hidden_folders'] += 1
-                continue
-            
-            # Remove duplicates if enabled
-            if os.environ.get('REMOVE_DUPLICATES', 'false').lower() == 'true':
-                if is_duplicate_and_remove(path):
-                    stats['duplicates_removed'] += 1
+            if file.lower().endswith('.mp3'):
+                # Ignore les fichiers qui commencent par un point
+                if os.path.basename(file).startswith('.'):
                     continue
-            
-            stats['total_files'] += 1
-            process_mp3_file(path, stats)
+                path = os.path.join(root, file)
+                mp3_files.append(path)
+
+    total = len(mp3_files)
+    for idx, path in enumerate(mp3_files, 1):
+        # Skip hidden folders
+        if is_in_hidden_folder(path):
+            print(f"File in hidden folder, ignored: {path}", file=sys.stderr)
+            stats['hidden_folders'] += 1
+            continue
+
+        # Remove duplicates if enabled
+        if os.environ.get('REMOVE_DUPLICATES', 'false').lower() == 'true':
+            if is_duplicate_and_remove(path):
+                stats['duplicates_removed'] += 1
+                continue
+
+        stats['total_files'] += 1
+        print(f"{idx}/{total} : {os.path.basename(path)}", file=sys.stderr)
+        process_mp3_file(path, stats)
     
     # Display processing summary
     print("\n" + "-"*80, file=sys.stderr)
@@ -74,6 +82,8 @@ def main(folder):
         print(f"  ├─ ✓ Artworks generated (cover.webp): {stats['artwork_fetched']}", file=sys.stderr)
     if stats['gain_fixed'] > 0:
         print(f"  ├─ ✓ Gain normalized (loudgain): {stats['gain_fixed']}", file=sys.stderr)
+    if stats['essentia_analyzed'] > 0:
+        print(f"  ├─ ✓ Essentia analysis generated: {stats['essentia_analyzed']}", file=sys.stderr)
     if stats['no_isrc_in_mp3'] > 0:
         print(f"  ├─ ✗ No ISRC in MP3: {stats['no_isrc_in_mp3']}", file=sys.stderr)
     if stats['no_matching_isrc'] > 0:

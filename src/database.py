@@ -21,10 +21,20 @@ def init_db():
         lyrics_fetched INTEGER DEFAULT 0,
         artwork_generated INTEGER DEFAULT 0,
         gain_applied INTEGER DEFAULT 0,
+        essentia_analyzed INTEGER DEFAULT 0,
         last_processed TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )''')
+    _ensure_column_exists(c, 'processed_files', 'essentia_analyzed', 'INTEGER DEFAULT 0')
     conn.commit()
     conn.close()
+
+
+def _ensure_column_exists(cursor, table_name, column_name, column_definition):
+    """Add a missing column to a table for simple schema migrations."""
+    cursor.execute(f"PRAGMA table_info({table_name})")
+    existing_columns = [row[1] for row in cursor.fetchall()]
+    if column_name not in existing_columns:
+        cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_definition}")
 
 
 def is_file_processed(file_path):
@@ -35,11 +45,11 @@ def is_file_processed(file_path):
         
     Returns:
         Dictionary with processing status (tags_fixed, lyrics_fetched,
-        artwork_generated, gain_applied) or None if not processed
+        artwork_generated, gain_applied, essentia_analyzed) or None if not processed
     """
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute('''SELECT tags_fixed, lyrics_fetched, artwork_generated, gain_applied 
+    c.execute('''SELECT tags_fixed, lyrics_fetched, artwork_generated, gain_applied, essentia_analyzed 
                  FROM processed_files WHERE filepath=?''', (file_path,))
     result = c.fetchone()
     conn.close()
@@ -48,13 +58,15 @@ def is_file_processed(file_path):
             'tags_fixed': bool(result[0]),
             'lyrics_fetched': bool(result[1]),
             'artwork_generated': bool(result[2]),
-            'gain_applied': bool(result[3])
+            'gain_applied': bool(result[3]),
+            'essentia_analyzed': bool(result[4])
         }
     return None
 
 
-def update_file_processing_status(file_path, tags_fixed=False, lyrics_fetched=False, 
-                                   artwork_generated=False, gain_applied=False):
+def update_file_processing_status(file_path, tags_fixed=False, lyrics_fetched=False,
+                                   artwork_generated=False, gain_applied=False,
+                                   essentia_analyzed=False):
     """Update the processing status for a file in the database.
     
     Args:
@@ -63,19 +75,21 @@ def update_file_processing_status(file_path, tags_fixed=False, lyrics_fetched=Fa
         lyrics_fetched: Whether lyrics were fetched
         artwork_generated: Whether artwork was generated
         gain_applied: Whether gain normalization was applied
+                essentia_analyzed: Whether Essentia analysis was applied
     """
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute('''INSERT INTO processed_files 
-                 (filepath, tags_fixed, lyrics_fetched, artwork_generated, gain_applied)
-                 VALUES (?, ?, ?, ?, ?)
+                                 (filepath, tags_fixed, lyrics_fetched, artwork_generated, gain_applied, essentia_analyzed)
+                                 VALUES (?, ?, ?, ?, ?, ?)
                  ON CONFLICT(filepath) DO UPDATE SET
                  tags_fixed = excluded.tags_fixed,
                  lyrics_fetched = excluded.lyrics_fetched,
                  artwork_generated = excluded.artwork_generated,
                  gain_applied = excluded.gain_applied,
+                                 essentia_analyzed = excluded.essentia_analyzed,
                  last_processed = CURRENT_TIMESTAMP''',
               (file_path, int(tags_fixed), int(lyrics_fetched), 
-               int(artwork_generated), int(gain_applied)))
+                             int(artwork_generated), int(gain_applied), int(essentia_analyzed)))
     conn.commit()
     conn.close()

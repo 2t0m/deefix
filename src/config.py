@@ -19,6 +19,7 @@ def get_processing_options():
         - remove_duplicates: Whether to remove duplicate files
         - fetch_video_artwork: Whether to generate artwork from Apple Music
         - fix_gain: Whether to apply loudgain normalization
+        - analyze_essentia: Whether to analyze tracks with Essentia extractor
     """
     return {
         'fix_tags': os.environ.get('FIX_TAGS', 'true').lower() == 'true',
@@ -26,4 +27,6 @@ def get_processing_options():
         'remove_duplicates': os.environ.get('REMOVE_DUPLICATES', 'false').lower() == 'true',
         'fetch_video_artwork': os.environ.get('FETCH_VIDEO_ARTWORK', 'true').lower() == 'true',
         'fix_gain': os.environ.get('FIX_GAIN', 'false').lower() == 'true',
+        'analyze_essentia': os.environ.get('ANALYZE_ESSENTIA', 'false').lower() == 'true',
+        'organize_mp3': os.environ.get('ORGANIZE_MP3', 'false').lower() == 'true',
     }
