@@ -18,6 +18,7 @@ Main environment variables (set in your environment or docker-compose):
 - `FIX_GAIN`: Normalize audio volume
 - `ANALYZE_ESSENTIA`: Audio analysis with Essentia (mood tags)
 - `ORGANIZE_MP3`: Organize MP3 files by artist/album
+- `FIX_MP3_PERMISSION`: Set organized MP3 + album/artist folders owner to 1000:1000
 
 ## Features
 - Fix MP3 tags via Deezer (ISRC)

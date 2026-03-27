@@ -23,16 +23,18 @@ def move_mp3_to_library(file_path, artist, album, title, music_root="/music"):
     from .config import get_processing_options
     options = get_processing_options()
     remove_duplicates = options.get('remove_duplicates', False)
+    fix_mp3_permission = options.get('fix_mp3_permission', False)
     removed = False
+    source_is_destination = False
     if os.path.abspath(file_path) == os.path.abspath(dest_path):
         # File is already in the correct location, no need to move
-        return dest_path
-    if os.path.exists(dest_path):
+        removed = True
+        source_is_destination = True
+    if os.path.exists(dest_path) and not source_is_destination:
         if remove_duplicates:
             # Never delete the source file, just ignore the move
             # (do nothing, do not print any message)
             removed = True
-            return dest_path
         else:
             # Rename with (1), (2), ...
             base, ext = os.path.splitext(dest_path)
@@ -54,15 +56,46 @@ def move_mp3_to_library(file_path, artist, album, title, music_root="/music"):
                 print(f"Moved cover.webp to: {dest_cover}", file=sys.stderr)
             except Exception as e:
                 print(f"Error moving cover.webp: {e}", file=sys.stderr)
+
+    def apply_owner_1000_1000(*paths):
+        if not fix_mp3_permission:
+            return
+        for path in paths:
+            if not path or not os.path.exists(path):
+                continue
+            try:
+                os.chown(path, 1000, 1000)
+            except AttributeError:
+                # os.chown is unavailable on some platforms.
+                return
+            except Exception as e:
+                print(f"Error applying ownership 1000:1000 on {path}: {e}", file=sys.stderr)
+
+    # Apply ownership to target MP3 + album and artist folders.
+    artist_folder = os.path.dirname(dest_dir)
+    dest_cover = os.path.join(dest_dir, 'cover.webp')
+    apply_owner_1000_1000(dest_path, dest_cover, dest_dir, artist_folder)
+
     # Clean up empty folders up the tree from the original file location
     def cleanup_empty_dirs(path, stop_at=music_root):
         path = os.path.dirname(path)
         stop_at = os.path.abspath(stop_at)
         while os.path.abspath(path).startswith(stop_at) and path != stop_at:
             try:
-                if not os.listdir(path):
+                entries = os.listdir(path)
+                if not entries:
                     os.rmdir(path)
                     print(f"Removed empty folder: {path}", file=sys.stderr)
+                elif len(entries) == 1 and os.path.isfile(os.path.join(path, entries[0])):
+                    only_file = entries[0].lower()
+                    if only_file.startswith('cover'):
+                        os.remove(os.path.join(path, entries[0]))
+                        os.rmdir(path)
+                        print(f"Removed cover-only folder: {path}", file=sys.stderr)
+                    else:
+                        break
+                else:
+                    break
                 path = os.path.dirname(path)
             except Exception:
                 break

@@ -26,3 +26,6 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Personal deploy script
+deploy.sh

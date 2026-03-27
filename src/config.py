@@ -20,6 +20,7 @@ def get_processing_options():
         - fetch_video_artwork: Whether to generate artwork from Apple Music
         - fix_gain: Whether to apply loudgain normalization
         - analyze_essentia: Whether to analyze tracks with Essentia extractor
+        - fix_mp3_permission: Whether to set owner to 1000:1000 on organized files/folders
     """
     return {
         'fix_tags': os.environ.get('FIX_TAGS', 'true').lower() == 'true',
@@ -29,4 +30,5 @@ def get_processing_options():
         'fix_gain': os.environ.get('FIX_GAIN', 'false').lower() == 'true',
         'analyze_essentia': os.environ.get('ANALYZE_ESSENTIA', 'false').lower() == 'true',
         'organize_mp3': os.environ.get('ORGANIZE_MP3', 'false').lower() == 'true',
+        'fix_mp3_permission': os.environ.get('FIX_MP3_PERMISSION', 'false').lower() == 'true',
     }
