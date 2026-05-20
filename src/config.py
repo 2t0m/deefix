@@ -31,4 +31,7 @@ def get_processing_options():
         'analyze_essentia': os.environ.get('ANALYZE_ESSENTIA', 'false').lower() == 'true',
         'organize_mp3': os.environ.get('ORGANIZE_MP3', 'false').lower() == 'true',
         'fix_mp3_permission': os.environ.get('FIX_MP3_PERMISSION', 'false').lower() == 'true',
+        'call_audiomuse': os.environ.get('AUDIOMUSE_AI_CALL', 'false').lower() == 'true',
+        'audiomuse_url': os.environ.get('AUDIOMUSE_AI_URL', '').rstrip('/'),
+        'audiomuse_debounce': int(os.environ.get('AUDIOMUSE_AI_DEBOUNCE', '30')),
     }

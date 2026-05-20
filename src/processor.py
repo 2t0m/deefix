@@ -12,6 +12,7 @@ from .deezer_api import search_deezer_track, get_deezer_track_info
 from .lyrics import search_lrclib_lyrics
 from .gain import fix_gain
 from .essentia_analysis import analyze_with_essentia
+from .audiomuse import schedule_global_rescan
 
 
 def handle_stats(stats, key):
@@ -149,6 +150,7 @@ def process_mp3_file(file_path, stats=None):
             gain_applied=processing_done['gain_applied'],
             essentia_analyzed=processing_done['essentia_analyzed']
         )
+    schedule_global_rescan()
     return result
 
 
